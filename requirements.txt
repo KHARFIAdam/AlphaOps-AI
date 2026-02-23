@@ -6,6 +6,3 @@ numpy
 kagglehub
 yfinance
 sqlglot
-langchain-community
-langchain-experimental
-langgraph

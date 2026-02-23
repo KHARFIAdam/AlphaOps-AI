@@ -1,0 +1,122 @@
+services:
+  postgres_data:
+    image: postgres:15
+    container_name: postgres_data
+    restart: always
+    environment:
+      - POSTGRES_USER=${PGUSER}
+      - POSTGRES_PASSWORD=${PGPASSWORD}
+      - POSTGRES_DB=${PGDATABASE}
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata_financial:/var/lib/postgresql/data
+
+  postgres_airflow:
+    image: postgres:15
+    container_name: postgres_airflow
+    restart: always
+    environment:
+      - POSTGRES_USER=${AIRFLOW_PGUSER}
+      - POSTGRES_PASSWORD=${AIRFLOW_PGPASSWORD}
+      - POSTGRES_DB=${AIRFLOW_PGDATABASE}
+    ports:
+      - "5434:5432"
+    volumes:
+      - pgdata_airflow:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${AIRFLOW_PGUSER}", "-d", "${AIRFLOW_PGDATABASE}"]
+      interval: 5s
+      retries: 10
+
+  airflow_init:
+    image: apache/airflow:2.9.3
+    container_name: airflow_init
+    depends_on:
+      postgres_airflow:
+        condition: service_healthy
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${AIRFLOW_PGUSER}:${AIRFLOW_PGPASSWORD}@postgres_airflow:5432/${AIRFLOW_PGDATABASE}
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      PYTHONPATH: /opt/airflow
+
+      # Connexion à la DB métier (utilisée par ton batch)
+      PGHOST: ${PGHOST}
+      PGPORT: ${PGPORT}
+      PGDATABASE: ${PGDATABASE}
+      PGUSER: ${PGUSER}
+      PGPASSWORD: ${PGPASSWORD}
+    volumes:
+      - ./:/opt/airflow
+    command: >
+      bash -c "
+      pip install -r /opt/airflow/requirements.txt &&
+      airflow db init &&
+      airflow users create --username admin --password admin --firstname admin --lastname admin --role Admin --email admin@local || true
+      "
+
+  airflow_webserver:
+    image: apache/airflow:2.9.3
+    container_name: airflow_webserver
+    restart: unless-stopped
+    depends_on:
+      airflow_init:
+        condition: service_completed_successfully
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${AIRFLOW_PGUSER}:${AIRFLOW_PGPASSWORD}@postgres_airflow:5432/${AIRFLOW_PGDATABASE}
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      PYTHONPATH: /opt/airflow
+
+      PGHOST: ${PGHOST}
+      PGPORT: ${PGPORT}
+      PGDATABASE: ${PGDATABASE}
+      PGUSER: ${PGUSER}
+      PGPASSWORD: ${PGPASSWORD}
+    volumes:
+      - ./:/opt/airflow
+    ports:
+      - "8081:8080"
+    command: >
+      bash -c "
+      pip install -r /opt/airflow/requirements.txt &&
+      airflow webserver
+      "
+
+  airflow_scheduler:
+    image: apache/airflow:2.9.3
+    container_name: airflow_scheduler
+    restart: unless-stopped
+    depends_on:
+      airflow_init:
+        condition: service_completed_successfully
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${AIRFLOW_PGUSER}:${AIRFLOW_PGPASSWORD}@postgres_airflow:5432/${AIRFLOW_PGDATABASE}
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      PYTHONPATH: /opt/airflow
+
+      PGHOST: ${PGHOST}
+      PGPORT: ${PGPORT}
+      PGDATABASE: ${PGDATABASE}
+      PGUSER: ${PGUSER}
+      PGPASSWORD: ${PGPASSWORD}
+    volumes:
+      - ./:/opt/airflow
+    command: >
+      bash -c "
+      pip install -r /opt/airflow/requirements.txt &&
+      airflow scheduler
+      "
+  
+  api:
+    build: ./api
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres_data
+
+volumes:
+  pgdata_financial:
+  pgdata_airflow:

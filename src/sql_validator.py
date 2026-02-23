@@ -1,44 +1,75 @@
 import sqlglot
 from sqlglot import parse_one, exp
-from typing import Dict, Any
-import logging
-
-logger = logging.getLogger(__name__)
+from typing import Dict, Any, List
+import re
 
 class SQLValidator:
-    def __init__(self, allowed_tables: list = ['dim_tickers', 'dimtime', 'fact_ohlcv']):
-        self.allowed_tables = allowed_tables
-    
+    def __init__(
+        self,
+        allowed_tables: List[str] = None,
+        max_limit: int = 500,
+        require_limit_on_fact: bool = True,
+    ):
+        self.allowed_tables = allowed_tables or ["dim_tickers", "dimtime", "fact_ohlcv"]
+        self.max_limit = max_limit
+        self.require_limit_on_fact = require_limit_on_fact
+
+    def _is_select_like(self, parsed) -> bool:
+        # SELECT ...
+        if isinstance(parsed, exp.Select):
+            return True
+        # WITH ... SELECT ...
+        if isinstance(parsed, exp.With):
+            return isinstance(parsed.this, exp.Select)
+        # Parfois parse_one renvoie Statement -> .this
+        if hasattr(parsed, "this"):
+            return self._is_select_like(parsed.this)
+        return False
+
     def validate(self, query: str) -> Dict[str, Any]:
-        """Valide SQL : safe + autorisé"""
         try:
-            # Parse SQL
-            parsed = parse_one(query, dialect='postgres')
+            q = query.strip()
+            parsed = parse_one(q, dialect="postgres")
+
+            # 1) uniquement SELECT / WITH..SELECT
+            if not self._is_select_like(parsed):
+                return {"is_valid": False, "reason": "Seulement SELECT autorisé (WITH...SELECT ok)."}
             
-            # 1. UNIQUEMENT SELECT
-            if not isinstance(parsed, exp.Select):
-                return {"is_valid": False, "reason": "Seulement SELECT autorisé (no INSERT/UPDATE/DELETE/DROP)"}
-            
-            # 2. Tables autorisées (gère joins/subqueries/CTE)
-            tables = parsed.find_all(exp.Table)
-            invalid_tables = [t.name for t in tables if t.name not in self.allowed_tables]
-            if invalid_tables:
-                return {"is_valid": False, "reason": f"Tables interdites: {invalid_tables}"}
-            
-            # 3. No LIMIT 0 ou * sans WHERE sur fact (évite full dump)
-            if isinstance(parsed.args.get('limit'), exp.Literal) and parsed.args['limit'].this == 0:
-                return {"is_valid": False, "reason": "LIMIT 0 interdit"}
-            
-            # 4. No injections pattern basique
-            dangerous = ['; --', 'UNION SELECT', 'pg_sleep', 'DROP TABLE']
-            if any(pat in query.upper() for pat in dangerous):
-                return {"is_valid": False, "reason": "Pattern malveillant détecté"}
-            
-            # 5. Check refs FK/schéma (optionnel avancé)
-            return {"is_valid": True, "reason": "Query safe", "validated_sql": query}
-            
+            # 2) tables autorisées
+            tables = list(parsed.find_all(exp.Table))
+            invalid = [t.name for t in tables if t.name not in self.allowed_tables]
+            if invalid:
+                return {"is_valid": False, "reason": f"Tables interdites: {invalid}"}
+
+            # 3) patterns dangereux (en upper)
+            upper = q.upper()
+            dangerous = [";--", "/*", "*/", "UNION", "PG_SLEEP", "DROP", "ALTER", "TRUNCATE", "INSERT", "UPDATE", "DELETE"]
+            if any(pat in upper for pat in dangerous):
+                return {"is_valid": False, "reason": "Pattern potentiellement dangereux détecté."}
+
+            # 4) limiter les dumps sur fact_ohlcv
+            uses_fact = any(t.name == "fact_ohlcv" for t in tables)
+
+            # LIMIT check
+            limit_exp = parsed.args.get("limit")
+            if limit_exp is not None:
+                lit = limit_exp.this
+                if isinstance(lit, exp.Literal) and lit.is_int:
+                    lim = int(lit.this)
+                    if lim <= 0:
+                        return {"is_valid": False, "reason": "LIMIT <= 0 interdit."}
+                    if lim > self.max_limit:
+                        return {"is_valid": False, "reason": f"LIMIT trop grand (max {self.max_limit})."}
+            else:
+                if uses_fact and self.require_limit_on_fact:
+                    return {"is_valid": False, "reason": f"Requête sur fact_ohlcv sans LIMIT (ajoute LIMIT <= {self.max_limit})."}
+
+            # * check (éviter SELECT * sur fact)
+            has_star = any(isinstance(x, exp.Star) for x in parsed.find_all(exp.Star))
+            if uses_fact and has_star:
+                return {"is_valid": False, "reason": "SELECT * interdit sur fact_ohlcv (sélectionne les colonnes nécessaires)."}
+
+            return {"is_valid": True, "reason": "Query safe", "validated_sql": q}
+
         except Exception as e:
             return {"is_valid": False, "reason": f"Erreur parse/validation: {str(e)}"}
-
-# Usage
-validator = SQLValidator()

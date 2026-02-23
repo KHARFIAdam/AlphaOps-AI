@@ -34,8 +34,8 @@ CREATE TABLE dim_tickers (
 
 # DimTime
 cur.execute("""
-DROP TABLE IF EXISTS dim_time CASCADE;
-CREATE TABLE dim_time (
+DROP TABLE IF EXISTS dimtime CASCADE;
+CREATE TABLE dimtime (
     date DATE PRIMARY KEY,
     year INT NOT NULL,
     month INT NOT NULL,
@@ -45,8 +45,8 @@ CREATE TABLE dim_time (
     is_weekend BOOLEAN NOT NULL,
     is_month_end BOOLEAN NOT NULL
 );
--- Seed DimTime de 2020 à 2026
-INSERT INTO DimTime SELECT
+-- Seed dimtime de 2020 à 2026
+INSERT INTO dimtime SELECT
     d::date as date,
     EXTRACT(YEAR FROM d)::INT,
     EXTRACT(MONTH FROM d)::INT,
@@ -63,7 +63,7 @@ cur.execute("""
 DROP TABLE IF EXISTS fact_ohlcv CASCADE;
 CREATE TABLE fact_ohlcv (
     symbol VARCHAR(20) NOT NULL REFERENCES dim_tickers(symbol),
-    date DATE NOT NULL REFERENCES dim_time(date),
+    date DATE NOT NULL REFERENCES dimtime(date),
     open_price DECIMAL(12,4) NOT NULL,
     high_price DECIMAL(12,4) NOT NULL,
     low_price DECIMAL(12,4) NOT NULL,
@@ -81,8 +81,27 @@ CREATE INDEX idx_fact_date_symbol ON fact_ohlcv (date, symbol);
 CREATE INDEX idx_fact_volume ON fact_ohlcv (volume DESC);
 CREATE INDEX idx_fact_close ON fact_ohlcv (close_price DESC);
             
--- Exemple de partitionnement (année)
-CREATE TABLE fact_ohlcv_2025 PARTITION OF fact_ohlcv FOR VALUES FROM ('2025-01-01') TO ('2026-01-01');
+
+CREATE TABLE fact_ohlcv_2020 PARTITION OF fact_ohlcv
+FOR VALUES FROM ('2020-01-01') TO ('2021-01-01');
+
+CREATE TABLE fact_ohlcv_2021 PARTITION OF fact_ohlcv
+FOR VALUES FROM ('2021-01-01') TO ('2022-01-01');
+
+CREATE TABLE fact_ohlcv_2022 PARTITION OF fact_ohlcv
+FOR VALUES FROM ('2022-01-01') TO ('2023-01-01');
+
+CREATE TABLE fact_ohlcv_2023 PARTITION OF fact_ohlcv
+FOR VALUES FROM ('2023-01-01') TO ('2024-01-01');
+
+CREATE TABLE fact_ohlcv_2024 PARTITION OF fact_ohlcv
+FOR VALUES FROM ('2024-01-01') TO ('2025-01-01');
+
+CREATE TABLE fact_ohlcv_2025 PARTITION OF fact_ohlcv
+FOR VALUES FROM ('2025-01-01') TO ('2026-01-01');
+
+CREATE TABLE fact_ohlcv_2026 PARTITION OF fact_ohlcv
+FOR VALUES FROM ('2026-01-01') TO ('2027-01-01');
 """)
 
 cur.close()

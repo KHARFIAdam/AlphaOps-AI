@@ -31,13 +31,29 @@ def get_schema(state):
 
 def generate_sql(state):
     prompt = ChatPromptTemplate.from_template("""
-Schéma DB stocks :
+Tu es un assistant Text-to-SQL pour PostgreSQL.
+
+Tables autorisées uniquement :
+- dim_tickers(symbol, name, market, sector, first_date, last_date, avg_volume, created_at)
+- dimtime(date, year, month, day, quarter, day_of_week, is_weekend, is_month_end)
+- fact_ohlcv(symbol, date, open_price, high_price, low_price, close_price, volume, adj_close, volatility)
+
+Règles:
+- Génère UNE SEULE requête SQL PostgreSQL.
+- SELECT uniquement (WITH...SELECT autorisé).
+- Toujours utiliser LIMIT <= 50.
+- Pour "hier"/"dernier"/"latest": utiliser la dernière date disponible avant CURRENT_DATE:
+  WHERE symbol = 'XXX' AND date < CURRENT_DATE ORDER BY date DESC LIMIT 1
+- Si l'utilisateur donne un nom (ex: "NVIDIA"), mapper via dim_tickers.name pour retrouver symbol.
+- Ne jamais utiliser SELECT *.
+
+Schéma technique:
 {db_schema}
 
-Question user : {input}
+Question user: {input}
 
-Génère UNE SEULE requête SELECT PostgreSQL safe. Utilise joins dim_tickers, dim_time, fact_ohlcv. Ne réponds qu'avec la requête SQL, sans explication.
-De plus, Si la date demandée est un jour non-tradé, utiliser la dernière date disponible avant cette date (MAX(date) <= target_date).""")
+Réponds uniquement avec le SQL.
+""")
 
     chain = prompt | llm
 
@@ -65,13 +81,16 @@ def execute_sql(state):
     except Exception as e:
         return {"result": f"Sheesh execution error: {str(e)}"}
     
+def format_answer(state):
+    return {"answer": "..."}
+    
 
 workflow = StateGraph(AgentState)
 workflow.add_node("get_schema", get_schema)
 workflow.add_node("generate_sql", generate_sql)
 workflow.add_node("validate_sql", validate_sql)
 workflow.add_node("execute_sql", execute_sql)
-
+workflow.add_node("format_answer", format_answer)
 workflow.set_entry_point("get_schema")
 workflow.add_edge("get_schema", "generate_sql")
 workflow.add_edge("generate_sql", "validate_sql")
