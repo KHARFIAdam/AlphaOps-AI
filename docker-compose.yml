@@ -11,6 +11,11 @@ services:
       - "5433:5432"
     volumes:
       - pgdata_financial:/var/lib/postgresql/data
+      - ./init-db:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${PGUSER}", "-d", "${PGDATABASE}"]
+      interval: 5s
+      retries: 10
 
   postgres_airflow:
     image: postgres:15
@@ -109,13 +114,6 @@ services:
       pip install -r /opt/airflow/requirements.txt &&
       airflow scheduler
       "
-  
-  api:
-    build: ./api
-    ports:
-      - "8000:8000"
-    depends_on:
-      - postgres_data
 
 volumes:
   pgdata_financial:

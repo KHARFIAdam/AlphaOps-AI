@@ -16,3 +16,7 @@ airflow.cfg
 
 # OS
 .DS_Store
+
+# Claude
+claude_logs/
+CLAUDE.md
